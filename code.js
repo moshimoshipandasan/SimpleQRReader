@@ -63,7 +63,9 @@ function doGet(e) {
   return HtmlService.createHtmlOutputFromFile('index.html')
       .setTitle('QRコードリーダー')
       // meta タグを追加してレスポンシブ対応を確実にする
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      // ★ Google Apps Scriptのヘッダーバーを非表示にする（推奨される方法）
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**
