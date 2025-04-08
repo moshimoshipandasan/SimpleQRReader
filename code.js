@@ -1,7 +1,8 @@
 // ★ スプレッドシートIDを保存するプロパティキー
 const SPREADSHEET_ID_PROPERTY_KEY = 'SPREADSHEET_ID';
-// ★ シート名を定数として定義 (これもプロパティ化可能だが、今回はIDのみ)
-const SHEET_NAME = 'ログ';
+// ★ シート名を定数として定義
+const LIST_SHEET_NAME = '一覧'; // データ更新対象シート
+const LOG_SHEET_NAME = 'ログ';   // ログ記録対象シート
 
 /**
  * スプレッドシートが開かれたときにカスタムメニューを追加する関数
@@ -60,7 +61,7 @@ function saveSpreadsheetId(spreadsheetId) {
 /**
  * WebアプリとしてアクセスされたときにHTMLを表示する関数
  */
-function doGet(e) {
+function doGet(e) { // この関数はWebアプリの入り口として必要です
   // HTMLサービスを使用してindex.htmlを表示
   return HtmlService.createHtmlOutputFromFile('index.html')
       .setTitle('QRコードリーダー')
@@ -72,58 +73,96 @@ function doGet(e) {
 
 /**
  * クライアントサイドJavaScriptから呼び出され、
- * スプレッドシートにQRコードデータとタイムスタンプを記録する関数
- * ★ LockServiceを使用して同時書き込みの競合を防ぐ
- * ★ スプレッドシートIDはプロパティから取得する
- * @param {string} qrCodeData 読み取られたQRコードのデータ
- * @return {string} 成功メッセージまたはエラーメッセージ
+ * QRコードデータ（識別番号）に一致する行のD列にデータを更新する関数
+ * @param {string} qrCodeData 読み取られたQRコードのデータ（識別番号）
+ * @param {string} inputValue index.htmlのテキストボックスに入力された値
+ * @return {string} 成功メッセージまたはエラーメッセージ（一覧シートの更新結果を返す）
  */
-function recordQRCodeData(qrCodeData) {
-  // ★ プロパティからスプレッドシートIDを取得
-  const spreadsheetId = PropertiesService.getScriptProperties().getProperty(SPREADSHEET_ID_PROPERTY_KEY);
+function updateDataByQRCode(qrCodeData, inputValue) {
+  // const sheetName = '一覧'; // LIST_SHEET_NAME を使用
+  const targetColumnIndex = 3; // D列 (0始まりのインデックス)
+  const idColumnIndex = 0; // A列 (識別番号、0始まり)
 
-  // ★ IDが設定されていない場合はエラーを返す
-  if (!spreadsheetId) {
-    const setupMessage = 'エラー: 記録先のスプレッドシートIDが設定されていません。スプレッドシートのメニュー「QRコードリーダー設定」>「スプレッドシートID設定」から設定してください。';
-    console.error(setupMessage);
-    return setupMessage;
-  }
+  // 値が空文字列の場合はTRUE（論理値）を設定
+  const valueToWrite = (inputValue === '') ? true : inputValue;
 
   const lock = LockService.getScriptLock();
-  let successMessage = '';
-
   try {
+    // 同時実行制御のためにロックを試みる (最大30秒待機)
     lock.waitLock(30000);
 
-    // ★ プロパティから取得したIDでスプレッドシートを開く
-    const ss = SpreadsheetApp.openById(spreadsheetId);
-    const sheet = ss.getSheetByName(SHEET_NAME);
+    // ★ スプレッドシートIDをプロパティから取得 (ログ記録にも必要)
+    const spreadsheetId = PropertiesService.getScriptProperties().getProperty(SPREADSHEET_ID_PROPERTY_KEY);
+    if (!spreadsheetId) {
+      // ID未設定の場合はエラーを返す (showSetSpreadsheetIdDialogで設定が必要)
+      throw new Error('記録先のスプレッドシートIDが設定されていません。メニューから設定してください。');
+    }
+    const ss = SpreadsheetApp.openById(spreadsheetId); // ★ IDで開く
 
-    if (!sheet) {
-      throw new Error(`シート '${SHEET_NAME}' が見つかりません。`);
+    // --- 1. 一覧シートの更新 ---
+    const listSheet = ss.getSheetByName(LIST_SHEET_NAME);
+    if (!listSheet) {
+      throw new Error(`シート「${LIST_SHEET_NAME}」が見つかりません。`);
     }
 
-    const lastRow = sheet.getLastRow();
-    const newId = lastRow;
-    const timestamp = new Date();
+    const dataRange = listSheet.getDataRange(); // ★ listSheetから取得
+    const values = dataRange.getValues();
 
-    sheet.appendRow([newId, qrCodeData, timestamp]);
+    let listUpdateSuccess = false; // 一覧シート更新成否フラグ
+    let targetRow = -1; // 見つかった行番号 (1始まり)
 
-    successMessage = `記録成功: ID=${newId}, QR=${qrCodeData}`;
-    console.log(successMessage);
+    // ヘッダー行を除いて識別番号を検索 (A列)
+    for (let i = 1; i < values.length; i++) {
+      // 型が異なる可能性を考慮して文字列として比較
+      if (String(values[i][idColumnIndex]) === String(qrCodeData)) {
+        targetRow = i + 1; // 行番号は1始まり
+        listUpdateSuccess = true; // ★フラグをtrueに
+        break;
+      }
+    }
 
-    lock.releaseLock();
-    return successMessage;
+    let updateResultMessage = ''; // クライアントに返すメッセージ
+
+    if (listUpdateSuccess) {
+      // D列 (インデックス3+1=4列目) に値を書き込む
+      listSheet.getRange(targetRow, targetColumnIndex + 1).setValue(valueToWrite);
+      console.log(`一覧シート更新成功: 識別番号=${qrCodeData}, 行=${targetRow}, 書き込み値=${valueToWrite}`);
+      updateResultMessage = "正常にデータ更新されました";
+    } else {
+      console.warn(`一覧シート更新失敗: 識別番号「${qrCodeData}」が見つかりません。`);
+      updateResultMessage = "識別番号がみつかりませんでした";
+      // ★識別番号が見つからない場合はログ記録もしない（あるいは別のログを残すか選択）
+      // 今回は見つからない場合はログも記録しない仕様とする
+    }
+
+    // --- 2. ログシートへの記録 (常に実行) ---
+    try {
+      const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
+      if (!logSheet) {
+        // ログシートがなくても処理は続行するが、コンソールに警告を出す
+        console.warn(`ログシート「${LOG_SHEET_NAME}」が見つかりません。ログは記録されません。`);
+      } else {
+        const timestamp = new Date();
+        // ログシートに追記 [タイムスタンプ, 識別番号, 入力値] (元の順序に戻す)
+        // 識別番号が見つからなかった場合も記録される
+        logSheet.appendRow([timestamp, qrCodeData, valueToWrite]);
+        console.log(`ログ記録試行: タイムスタンプ=${timestamp}, 識別番号=${qrCodeData}, 値=${valueToWrite}, 更新結果=${listUpdateSuccess}`);
+      }
+    } catch (logError) {
+      // ログ記録のエラーはコンソールに出力するのみで、クライアントへのエラーとはしない
+      console.error(`ログ記録エラー: 識別番号=${qrCodeData}, 値=${valueToWrite}`, logError);
+    }
+
+    // 最終的な結果メッセージ（一覧シートの更新結果）を返す
+    return updateResultMessage;
 
   } catch (error) {
-    console.error('スプレッドシート記録エラー:', error);
-    // エラーにスプレッドシートIDに関する情報が含まれているか確認
-    if (error.message.includes("You do not have permission") || error.message.includes("not found")) {
-       return `エラー: スプレッドシート (ID: ${spreadsheetId}) へのアクセス権がないか、シートが見つかりません。IDが正しいか、アクセス権を確認してください。詳細: ${error.message}`;
-    }
-    return `エラー: ${error.message}`;
+    console.error('データ更新/ログ記録処理エラー:', error);
+    // より詳細なエラーメッセージをクライアントに返す
+    // スプレッドシートID未設定エラーもここでキャッチされる
+    return `エラーが発生しました: ${error.message}`;
   } finally {
-    // finallyブロックでもロックが保持されていれば解放する
+    // 処理が終了したら必ずロックを解放する
     if (lock.hasLock()) {
       lock.releaseLock();
     }
@@ -151,8 +190,8 @@ function createQRCodes() {
   for (let i = 1; i < values.length; i++) { // i = 0 はヘッダーなのでスキップ
     const id = values[i][0]; // A列の識別番号
     if (id) { // 識別番号が空でない場合のみ処理
-      // api.qrserver.com APIを使用してQRコードURLを生成 (サイズ75x75, マージン10)
-      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=75x75&data=${encodeURIComponent(id)}&margin=10`;
+      // api.qrserver.com APIを使用してQRコードURLを生成 (サイズ150x150, マージン10)
+      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(id)}&margin=10`;
       // IMAGE関数を作成
       formulas.push([`=IMAGE("${qrCodeUrl}")`]);
     } else {

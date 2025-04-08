@@ -13,6 +13,7 @@
             --dark-gray: #6c757d;
             --success-color: #28a745;
             --error-color: #dc3545;
+            --warning-color: #fd7e14; /* ★オレンジ色を追加 */
         }
         body {
             font-family: 'Noto Sans JP', sans-serif; /* モダンなフォント */
@@ -21,22 +22,22 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 20px;
+            padding: 5px 20px 20px 20px; /* 上部のパディングを減らす */
             box-sizing: border-box;
             min-height: 100vh;
             margin: 0;
         }
         h1 {
             color: var(--dark-gray);
-            margin-top: 15px; /* 上マージンを少し減らす */
-            margin-bottom: 15px; /* 下マージンも減らす */
+            margin-top: 5px; /* 上マージンをさらに減らす */
+            margin-bottom: 10px; /* 下マージンも少し減らす */
             font-size: 1.8em; /* 少しだけ大きく */
         }
         #video-container {
             position: relative;
             width: 70%; /* ★さらに小さく */
             max-width: 300px; /* ★最大幅も小さく */
-            margin: 0 auto 15px auto; /* ★下マージンを少し減らす */
+            margin: 0 auto 10px auto; /* 下マージンを少し減らす */
             overflow: hidden;
             border-radius: 12px; /* 角丸も少し調整 */
             background-color: #000;
@@ -67,8 +68,8 @@
             display: none; /* 読み取り用は非表示 */
         }
         #output {
-            margin-top: 25px;
-            padding: 20px;
+            margin-top: 15px; /* 上マージンを減らす */
+            padding: 15px 20px; /* 上下のパディングも少し減らす */
             border: none; /* ボーダー削除 */
             background-color: #fff; /* 白背景 */
             border-radius: 8px; /* 角丸 */
@@ -189,10 +190,15 @@
     <div id="loading-message">カメラを起動しています...</div>
 
     <div id="output" style="display: none;">
-        <p>読み取り結果:</p>
+        <p>読み取り結果 (識別番号):</p>
         <div id="output-data"></div>
+        <!-- ★テキスト入力フィールドを追加 -->
+        <div style="margin-top: 15px;">
+            <label for="inputValue" style="display: block; margin-bottom: 5px; font-size: 0.9em; color: var(--dark-gray);">入力値:</label>
+            <input type="text" id="inputValue" placeholder="値を入力 (空欄の場合はTRUE)" style="width: 80%; padding: 8px; border: 1px solid var(--medium-gray); border-radius: 4px; font-size: 1em;">
+        </div>
         <div class="button-container"> <!-- ★ボタン用コンテナ -->
-            <button id="send-button" class="output-button" disabled>スプレッドシートに記録</button>
+            <button id="send-button" class="output-button" disabled>データ更新</button> <!-- ボタンテキスト変更 -->
             <button id="reset-button" class="output-button" disabled>リセット</button> <!-- ★リセットボタン追加 -->
         </div>
         <p id="send-status"></p>
@@ -213,11 +219,13 @@
         const sendButton = document.getElementById('send-button');
         const resetButton = document.getElementById('reset-button'); // ★リセットボタン取得
         const sendStatus = document.getElementById('send-status');
+        const inputValueElement = document.getElementById('inputValue'); // ★テキストボックス取得
 
         let stream = null;
         let scanning = true; // スキャン中かどうかを示すフラグ (常にtrueで良いかも)
         let detectedQrCodeData = null; // 検出中のQRコードデータ
         let isSending = false; // 送信中フラグ
+        let messageTimer = null; // ★メッセージ表示タイマー
 
         // カメラの起動
         async function startCamera() {
@@ -278,9 +286,9 @@
                         detectedQrCodeData = code.data; // データを一時保持
                         outputData.innerText = detectedQrCodeData; // 検出データを表示 (任意)
                         outputContainer.style.display = 'block';
-                        sendButton.disabled = false; // ★記録ボタン有効化
+                        sendButton.disabled = false; // ★更新ボタン有効化
                         resetButton.disabled = false; // ★リセットボタンも有効化
-                        sendStatus.innerText = 'QRコードを検出しました。ボタンを押して記録します。';
+                        sendStatus.innerText = '識別番号を検出しました。値を入力して更新ボタンを押してください。'; // メッセージ変更
 
                         // ★検出したQRコードを黄色い枠で囲む
                         drawBoundingBox(code.location);
@@ -300,16 +308,16 @@
                     } else {
                         // QRコードが見つからない場合
                         if (detectedQrCodeData) {
-                            // 直前まで検出していた場合は情報をクリア
-                            detectedQrCodeData = null;
-                            sendButton.disabled = true; // ★記録ボタン無効化
-                            resetButton.disabled = true; // ★リセットボタンも無効化
-                            sendStatus.innerText = 'QRコードを探しています...';
+                            // 直前まで検出していた場合は情報をクリアしない（UIリセット時にクリア）
+                            // detectedQrCodeData = null;
+                            // sendButton.disabled = true; // ボタンはリセット時に無効化
+                            // resetButton.disabled = true;
+                            // sendStatus.innerText = 'QRコードを探しています...'; // メッセージはリセット時に設定
                             overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-                            // outputContainer.style.display = 'none'; // 検出時以外は隠すなら
+                            // outputContainer.style.display = 'none'; // 検出時以外は隠す
                         }
                         // スキャンを続ける
-                        requestAnimationFrame(tick);
+                        requestAnimationFrame(tick); // QRコードが見つからなくてもスキャンは続ける
                     }
                 } catch (error) {
                     console.error("キャンバス/jsQRエラー:", error);
@@ -407,18 +415,17 @@
             }
         }
 
-        // 記録ボタンのクリックイベントリスナー
+        // 更新ボタンのクリックイベントリスナー
         sendButton.addEventListener('click', () => {
             if (!detectedQrCodeData) {
-                sendStatus.innerText = 'エラー: 記録するQRコードデータが見つかりません。';
+                sendStatus.innerText = 'エラー: 更新対象の識別番号が見つかりません。';
                 return;
             }
             if (isSending) {
                 return; // 送信中の多重クリック防止
             }
-            if (isSending) {
-                return; // 送信中の多重クリック防止
-            }
+
+            const inputValue = inputValueElement.value.trim(); // ★テキストボックスの値を取得
 
             // ★確認音を鳴らす
             playConfirmBeep();
@@ -426,56 +433,85 @@
             isSending = true;
             sendButton.disabled = true;
             resetButton.disabled = true; // 送信中はリセットも無効化
-            sendStatus.innerText = 'スプレッドシートに記録中...';
-            console.log("送信データ:", detectedQrCodeData);
+            sendStatus.innerText = 'スプレッドシートを更新中...'; // メッセージ変更
+            console.log("送信データ:", { qrCode: detectedQrCodeData, value: inputValue }); // 送信内容をログに
 
-            // google.script.run を使ってGASの関数を呼び出す
+            // google.script.run を使って新しいGASの関数を呼び出す
             google.script.run
                 .withSuccessHandler(onSendSuccess)
                 .withFailureHandler(onSendFailure)
-                .recordQRCodeData(detectedQrCodeData); // 検出していたデータを送信
+                .updateDataByQRCode(detectedQrCodeData, inputValue); // ★QRデータと入力値を渡す
         });
 
         // GASへの送信成功時の処理
         function onSendSuccess(response) {
             isSending = false; // 送信完了
-            // sendStatus.innerText = `記録しました！ (${response})`; // メッセージはリセット関数内で設定
             console.log('GAS Success:', response);
-            resetUIAndRestartScan(`記録しました！ (${response})`); // ★リセットしてスキャン再開
+            resetUIAndRestartScan(response); // ★GASからのメッセージを表示してリセット
         }
 
         // GASへの送信失敗時の処理
         function onSendFailure(error) {
             isSending = false; // 送信完了 (失敗)
-            let errorMessage = '記録に失敗しました。';
-            if (error && error.message) {
+            let errorMessage = '更新に失敗しました。'; // メッセージ変更
+            // エラーオブジェクトからメッセージを抽出する試み
+            if (error && typeof error === 'object' && error.message) {
                 errorMessage += ` エラー: ${error.message}`;
             } else if (typeof error === 'string') {
                  errorMessage += ` エラー: ${error}`;
+            } else {
+                errorMessage += ' 不明なエラーが発生しました。';
             }
-            // sendStatus.innerText = errorMessage; // メッセージはリセット関数内で設定
             console.error('GAS Failure:', error);
             resetUIAndRestartScan(errorMessage, true); // ★リセットしてスキャン再開 (エラー状態)
         }
 
-        // ★UIをリセットし、スキャンを即座に再開する関数
-        function resetUIAndRestartScan(message = "リセットしました。QRコードをスキャンしてください", isError = false) {
-            // UI要素のリセット
+        // ★UIをリセットし、メッセージを表示後、スキャンを再開する関数
+        function resetUIAndRestartScan(message = "リセットしました。", isError = false, duration = 3000) { // メッセージ表示時間を追加 (デフォルト3秒)
+            // 既存のメッセージタイマーがあればクリア
+            if (messageTimer) {
+                clearTimeout(messageTimer);
+                messageTimer = null;
+            }
+
+            // UI要素のリセット (メッセージ表示より前に)
             detectedQrCodeData = null;
             outputData.innerText = '';
+            inputValueElement.value = ''; // ★テキストボックスもクリア
             outputContainer.style.display = 'none';
             sendButton.disabled = true;
             resetButton.disabled = true; // リセットボタンも無効化
             overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-            loadingMessage.innerText = message; // メッセージを表示
-            loadingMessage.style.display = 'block';
-            sendStatus.innerText = ''; // 送信ステータスはクリア (loadingMessageで状態を示すため)
+            sendStatus.innerText = ''; // 送信ステータスはクリア
 
-            // isSendingフラグもリセット (失敗時などにtrueのままになるのを防ぐ)
+            // メッセージを表示
+            loadingMessage.innerText = message;
+            // ★メッセージ内容に応じて色を設定
+            if (isError) {
+                loadingMessage.style.color = 'var(--error-color)'; // 一般的なエラーは赤
+            } else if (message === "正常にデータ更新されました") {
+                loadingMessage.style.color = 'var(--success-color)'; // 成功は緑
+            } else if (message === "識別番号がみつかりませんでした") {
+                loadingMessage.style.color = 'var(--warning-color)'; // 識別番号なしはオレンジ
+            } else {
+                loadingMessage.style.color = 'var(--dark-gray)'; // それ以外はデフォルトのグレー
+            }
+            loadingMessage.style.display = 'block';
+
+            // isSendingフラグもリセット
             isSending = false;
 
-            // 次のスキャンフレームを要求して即座に反応するようにする
-            requestAnimationFrame(tick);
+            // 指定時間後にメッセージをデフォルトに戻し、スキャンを促す
+            messageTimer = setTimeout(() => {
+                loadingMessage.innerText = "QRコードをスキャンしてください";
+                loadingMessage.style.color = 'var(--dark-gray)'; // 色をデフォルトに戻す
+                messageTimer = null;
+                // タイマー完了後にスキャンフレームを要求
+                requestAnimationFrame(tick);
+            }, duration);
+
+            // 注意: すぐに tick を呼ばないように変更
+            // requestAnimationFrame(tick);
         }
 
         // ★リセットボタンのクリックイベントリスナー
@@ -486,7 +522,12 @@
             // ★キャンセル音を鳴らす
             playCancelBeep();
 
-            resetUIAndRestartScan(); // UI状態をリセットしてスキャン再開
+            // メッセージタイマーがあればクリアし、即座にデフォルトメッセージでリセット
+            if (messageTimer) {
+                clearTimeout(messageTimer);
+                messageTimer = null;
+            }
+            resetUIAndRestartScan("リセットしました。QRコードをスキャンしてください", false, 0); // duration 0 で即座にスキャン開始メッセージへ
         });
 
 
