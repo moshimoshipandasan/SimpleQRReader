@@ -1,3 +1,60 @@
+// ★ スプレッドシートIDを保存するプロパティキー
+const SPREADSHEET_ID_PROPERTY_KEY = 'SPREADSHEET_ID';
+// ★ シート名を定数として定義 (これもプロパティ化可能だが、今回はIDのみ)
+const SHEET_NAME = 'シート1';
+
+/**
+ * スプレッドシートが開かれたときにカスタムメニューを追加する関数
+ */
+function onOpen(e) {
+  SpreadsheetApp.getUi()
+      .createMenu('QRコードリーダー設定')
+      .addItem('スプレッドシートID設定', 'showSetSpreadsheetIdDialog')
+      .addToUi();
+}
+
+/**
+ * スプレッドシートID設定ダイアログを表示する関数
+ */
+function showSetSpreadsheetIdDialog() {
+  const ui = SpreadsheetApp.getUi();
+  const scriptProperties = PropertiesService.getScriptProperties();
+  const currentId = scriptProperties.getProperty(SPREADSHEET_ID_PROPERTY_KEY);
+
+  const promptMessage = currentId
+    ? `現在のスプレッドシートID: ${currentId}\n\n新しいIDを入力してください (キャンセルで変更なし):`
+    : '記録先のスプレッドシートIDを入力してください:';
+
+  const result = ui.prompt(
+      'スプレッドシートID設定',
+      promptMessage,
+      ui.ButtonSet.OK_CANCEL);
+
+  // OKボタンが押され、テキストが入力された場合
+  if (result.getSelectedButton() == ui.Button.OK) {
+    const newId = result.getResponseText().trim();
+    if (newId) {
+      saveSpreadsheetId(newId);
+      ui.alert(`スプレッドシートIDを「${newId}」に設定しました。`);
+    } else if (currentId) {
+      // 新しいIDが空で、既存のIDがあった場合は変更しない旨を通知（任意）
+      ui.alert('IDが入力されなかったため、変更されませんでした。');
+    } else {
+       ui.alert('IDが入力されていません。設定をキャンセルしました。');
+    }
+  } else {
+    ui.alert('設定をキャンセルしました。');
+  }
+}
+
+/**
+ * スプレッドシートIDをスクリプトプロパティに保存する関数
+ * @param {string} spreadsheetId 保存するスプレッドシートID
+ */
+function saveSpreadsheetId(spreadsheetId) {
+  PropertiesService.getScriptProperties().setProperty(SPREADSHEET_ID_PROPERTY_KEY, spreadsheetId);
+}
+
 /**
  * WebアプリとしてアクセスされたときにHTMLを表示する関数
  */
@@ -12,41 +69,56 @@ function doGet(e) {
 /**
  * クライアントサイドJavaScriptから呼び出され、
  * スプレッドシートにQRコードデータとタイムスタンプを記録する関数
+ * ★ LockServiceを使用して同時書き込みの競合を防ぐ
+ * ★ スプレッドシートIDはプロパティから取得する
  * @param {string} qrCodeData 読み取られたQRコードのデータ
  * @return {string} 成功メッセージまたはエラーメッセージ
  */
 function recordQRCodeData(qrCodeData) {
+  // ★ プロパティからスプレッドシートIDを取得
+  const spreadsheetId = PropertiesService.getScriptProperties().getProperty(SPREADSHEET_ID_PROPERTY_KEY);
+
+  // ★ IDが設定されていない場合はエラーを返す
+  if (!spreadsheetId) {
+    const setupMessage = 'エラー: 記録先のスプレッドシートIDが設定されていません。スプレッドシートのメニュー「QRコードリーダー設定」>「スプレッドシートID設定」から設定してください。';
+    console.error(setupMessage);
+    return setupMessage;
+  }
+
+  const lock = LockService.getScriptLock();
+  let successMessage = '';
+
   try {
-    // アクティブなスプレッドシートを取得
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    // 'シート1' という名前のシートを取得（存在しない場合はエラーになる）
-    const sheet = ss.getSheetByName('シート1');
+    lock.waitLock(30000);
+
+    // ★ プロパティから取得したIDでスプレッドシートを開く
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    const sheet = ss.getSheetByName(SHEET_NAME);
 
     if (!sheet) {
-      throw new Error("シート 'シート1' が見つかりません。");
+      throw new Error(`シート '${SHEET_NAME}' が見つかりません。`);
     }
 
-    // スプレッドシートの最終行を取得
     const lastRow = sheet.getLastRow();
-    // 新しいIDを生成 (最終行 + 1 とするが、ヘッダーがあるのでそのまま lastRow + 1 で良い)
-    // もしIDが厳密に連番である必要がある場合は、A列の最大値を取得するなどの処理が必要
-    const newId = lastRow; // ヘッダー行があるので、次の行番号は lastRow + 1 だが、IDとしては lastRow が適切かも？要件次第。ここではシンプルに行番号を使う。
-
-    // 現在の日時を取得
+    const newId = lastRow;
     const timestamp = new Date();
 
-    // シートに新しい行を追加 [ID, QRCode, Timestamp] の順
     sheet.appendRow([newId, qrCodeData, timestamp]);
 
-    // 成功メッセージを返す
-    return `記録成功: ID=${newId}, QR=${qrCodeData}`;
+    successMessage = `記録成功: ID=${newId}, QR=${qrCodeData}`;
+    console.log(successMessage);
+
+    lock.releaseLock();
+    return successMessage;
 
   } catch (error) {
     console.error('スプレッドシート記録エラー:', error);
-    // エラーメッセージをクライアントに返す
-    // error オブジェクト全体ではなく、message プロパティを返す方が安全
+    // エラーにスプレッドシートIDに関する情報が含まれているか確認
+    if (error.message.includes("You do not have permission") || error.message.includes("not found")) {
+       return `エラー: スプレッドシート (ID: ${spreadsheetId}) へのアクセス権がないか、シートが見つかりません。IDが正しいか、アクセス権を確認してください。詳細: ${error.message}`;
+    }
     return `エラー: ${error.message}`;
-    // より詳細なエラーを返したい場合は以下のようにする（デバッグ時など）
-    // return `エラー: ${error.toString()} スタック: ${error.stack}`;
+  } finally {
+    lock.releaseLock();
   }
 }

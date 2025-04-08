@@ -283,6 +283,9 @@
                         // ★検出したQRコードを黄色い枠で囲む
                         drawBoundingBox(code.location);
 
+                        // ★検出音「ピッピッ」を鳴らす
+                        playDetectionBeep();
+
                         // 任意: 検出音を鳴らす (一度だけ鳴らすなどの制御が必要かも)
                         // const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                         // const oscillator = audioCtx.createOscillator();
@@ -335,6 +338,59 @@
             overlayCtx.stroke();
         }
 
+        // --- ★オーディオフィードバック関連 ---
+        let audioCtx = null; // AudioContextを保持 (ユーザー操作後に初期化)
+
+        // AudioContextを初期化する関数 (ユーザー操作が必要)
+        function initAudioContext() {
+            if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                console.log("AudioContext initialized.");
+            }
+        }
+
+        // 基本的な音を再生する関数
+        function playAudioFeedback(frequency = 440, duration = 0.05, delay = 0) {
+             if (!audioCtx) {
+                 console.warn("AudioContext not initialized. Cannot play sound.");
+                 return;
+             }
+             try {
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime + delay);
+                gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime + delay); // 音量を少し下げる
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + delay + duration);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                oscillator.start(audioCtx.currentTime + delay);
+                oscillator.stop(audioCtx.currentTime + delay + duration);
+             } catch (error) {
+                 console.error("Error playing audio feedback:", error);
+             }
+        }
+
+        // 検出音「ピッピッ」
+        function playDetectionBeep() {
+            playAudioFeedback(880, 0.05, 0);    // 1回目のピッ
+            playAudioFeedback(880, 0.05, 0.07); // 2回目のピッ (少し遅らせる)
+        }
+
+        // 記録ボタン（確認音）
+        function playConfirmBeep() {
+            playAudioFeedback(1000, 0.08); // 少し高めの音
+        }
+
+        // リセットボタン（キャンセル音）
+        function playCancelBeep() {
+            playAudioFeedback(660, 0.08); // 少し低めの音
+        }
+        // --- オーディオフィードバック関連ここまで ---
+
 
         // カメラを停止する関数
         function stopCamera() {
@@ -358,9 +414,16 @@
             if (isSending) {
                 return; // 送信中の多重クリック防止
             }
+            if (isSending) {
+                return; // 送信中の多重クリック防止
+            }
 
-            isSending = true; // 送信開始
-            sendButton.disabled = true; // ボタンを無効化
+            // ★確認音を鳴らす
+            playConfirmBeep();
+
+            isSending = true;
+            sendButton.disabled = true;
+            resetButton.disabled = true; // 送信中はリセットも無効化
             sendStatus.innerText = 'スプレッドシートに記録中...';
             console.log("送信データ:", detectedQrCodeData);
 
@@ -416,15 +479,22 @@
         // ★リセットボタンのクリックイベントリスナー
         resetButton.addEventListener('click', () => {
             console.log("リセットボタンクリック");
-            if (isSending) return; // 送信中はリセットしない
+            if (isSending) return;
+
+            // ★キャンセル音を鳴らす
+            playCancelBeep();
+
             resetUIAndRestartScan(); // UI状態をリセットしてスキャン再開
         });
 
 
-        // ページ読み込み時にカメラを起動
-        // DOMContentLoadedを待ってから実行する方が安全な場合がある
-        document.addEventListener('DOMContentLoaded', (event) => {
+        // ページ読み込み時にカメラを起動 & AudioContext初期化準備
+        document.addEventListener('DOMContentLoaded', () => {
             startCamera();
+            // ユーザーが最初に画面をクリック/タップしたときにAudioContextを初期化
+            // これにより、多くのブラウザでの自動再生ポリシー制限を回避
+            document.body.addEventListener('click', initAudioContext, { once: true });
+            document.body.addEventListener('touchstart', initAudioContext, { once: true });
         });
 
         // ウィンドウが閉じられる/非表示になるときにカメラを停止
