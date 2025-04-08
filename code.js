@@ -8,8 +8,10 @@ const SHEET_NAME = 'ログ';
  */
 function onOpen(e) {
   SpreadsheetApp.getUi()
-      .createMenu('QRコードリーダー設定')
-      .addItem('スプレッドシートID設定', 'showSetSpreadsheetIdDialog')
+      .createMenu('QRコードツール') // メニュー名を変更
+      .addItem('QRコードリーダー設定', 'showSetSpreadsheetIdDialog') // サブメニュー化も検討可能だが、一旦並列で追加
+      .addSeparator() // 区切り線を追加
+      .addItem('QRコード作成 (一覧シート)', 'createQRCodes') // 新しいメニュー項目を追加
       .addToUi();
 }
 
@@ -121,6 +123,53 @@ function recordQRCodeData(qrCodeData) {
     }
     return `エラー: ${error.message}`;
   } finally {
-    lock.releaseLock();
+    // finallyブロックでもロックが保持されていれば解放する
+    if (lock.hasLock()) {
+      lock.releaseLock();
+    }
+  }
+}
+
+/**
+ * 「一覧」シートのA列のデータからQRコードを生成し、C列にIMAGE関数で表示する関数
+ */
+function createQRCodes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetName = '一覧'; // 対象シート名
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert(`シート「${sheetName}」が見つかりません。`);
+    return;
+  }
+
+  const dataRange = sheet.getDataRange();
+  const values = dataRange.getValues(); // シート全体のデータを取得
+
+  // ヘッダー行を除き、A列にデータがある行を処理
+  const formulas = [];
+  for (let i = 1; i < values.length; i++) { // i = 0 はヘッダーなのでスキップ
+    const id = values[i][0]; // A列の識別番号
+    if (id) { // 識別番号が空でない場合のみ処理
+      // api.qrserver.com APIを使用してQRコードURLを生成 (サイズ75x75, マージン10)
+      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=75x75&data=${encodeURIComponent(id)}&margin=10`;
+      // IMAGE関数を作成
+      formulas.push([`=IMAGE("${qrCodeUrl}")`]);
+    } else {
+      formulas.push(['']); // 識別番号がない場合は空文字を設定
+    }
+  }
+
+  // C列（3列目）のデータ範囲に数式を設定 (ヘッダー行を除く)
+  if (formulas.length > 0) {
+    // 書き込み範囲を A列のデータがある行数 + 1行目(ヘッダー) から計算
+    // 開始行: 2 (ヘッダーの次)
+    // 開始列: 3 (C列)
+    // 行数: formulas.length
+    // 列数: 1
+    sheet.getRange(2, 3, formulas.length, 1).setFormulas(formulas);
+    SpreadsheetApp.getUi().alert('QRコードの生成が完了しました。');
+  } else {
+    SpreadsheetApp.getUi().alert('処理対象のデータがありませんでした。');
   }
 }
