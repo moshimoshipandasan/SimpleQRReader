@@ -40,11 +40,11 @@
             overflow: hidden;
             border-radius: 12px; /* 角丸も少し調整 */
             background-color: #000;
-            /* 正方形維持トリック (幅に合わせて調整) */
-            padding-bottom: calc(70% - 2px); /* ★幅に合わせて調整 */
-            height: 0;
+            /* ★固定サイズで正方形にする */
+            height: 300px; /* ★高さをmax-widthと同じに設定 */
+            padding-bottom: 0; /* ★padding-bottomトリックを削除 */
             border: 1px solid var(--medium-gray);
-            box-shadow: 0 3px 6px rgba(0,0,0,0.1); /* 影も少し調整 */
+            box-shadow: 0 3px 6px rgba(0,0,0,0.1);
         }
         #video {
             display: block;
@@ -158,8 +158,10 @@
              font-size: 1.5em;
              }
              #video-container {
-                 width: 85%; /* スマホでは少し大きめに */
-                 padding-bottom: calc(85% - 2px);
+                 width: 85%; /* スマホでは幅を%指定 */
+                 max-width: 300px; /* 最大幅は維持 */
+                 height: auto; /* ★スマホでは高さを自動に */
+                 padding-bottom: calc(85% - 2px); /* ★スマホではpadding-bottomトリックを再適用 */
              }
              #output {
                  width: 95%;

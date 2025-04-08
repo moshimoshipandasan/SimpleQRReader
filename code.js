@@ -1,7 +1,7 @@
 // ★ スプレッドシートIDを保存するプロパティキー
 const SPREADSHEET_ID_PROPERTY_KEY = 'SPREADSHEET_ID';
 // ★ シート名を定数として定義 (これもプロパティ化可能だが、今回はIDのみ)
-const SHEET_NAME = 'シート1';
+const SHEET_NAME = 'ログ';
 
 /**
  * スプレッドシートが開かれたときにカスタムメニューを追加する関数
